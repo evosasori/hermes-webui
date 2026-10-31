@@ -3760,6 +3760,18 @@ function _sessionListQueryString() {
   return `?${qs.toString()}`;
 }
 
+function _getSidebarGroupMode() {
+  try {
+    const stored = localStorage.getItem('hermes-sidebar-group-by');
+    if (stored === 'date' || stored === 'project') return stored;
+  } catch (_e) {}
+  return (typeof _allProjects !== 'undefined' && _allProjects && _allProjects.length > 0) ? 'project' : 'date';
+}
+
+function _setSidebarGroupMode(mode) {
+  try { localStorage.setItem('hermes-sidebar-group-by', mode); } catch (_e) {}
+}
+
 function _sessionSourceTabCount(filter, renderedWebuiSessionCount, renderedCliSessionCount) {
   const serverCount = filter === 'cli' ? _serverCliSessionCount : _serverWebuiSessionCount;
   if (Number.isFinite(serverCount)) return serverCount;
@@ -7457,6 +7469,8 @@ function _sessionListRenderSignature(){
       _activeSessionIdForSidebar(),
       search,
       _sessionSourceFilter,
+      _activeProject,
+      _getSidebarGroupMode(),
       !!_sessionSelectMode,
       (window._sidebarDensity==='detailed'?'d':'c'),
       !!_showAllProfiles,
@@ -9947,6 +9961,22 @@ function _sidebarProjectResolver(rowsById){
       onPath.add(sid); path.push(sid);
       cur=parentOf(cur);
     }
+    if(!result){
+      const ws = (cur && (cur.workspace || cur.cwd)) || (s && (s.workspace || s.cwd));
+      if(ws && typeof _allProjects !== 'undefined' && Array.isArray(_allProjects)){
+        let bestMatch = null, bestLen = 0;
+        for(const p of _allProjects){
+          if(Array.isArray(p.workspaces)){
+            for(const pw of p.workspaces){
+              if(pw && (ws === pw || ws.startsWith(pw.endsWith('/') ? pw : pw + '/'))){
+                if(pw.length > bestLen){ bestLen = pw.length; bestMatch = p.project_id; }
+              }
+            }
+          }
+        }
+        if(bestMatch) result = bestMatch;
+      }
+    }
     for(const sid of path) memo.set(sid,result);
     return result;
   };
@@ -10428,6 +10458,22 @@ function renderSessionListFromCache(){
     addBtn.title='New project';
     addBtn.onclick=(e)=>{e.stopPropagation();_startProjectCreate(bar,addBtn);};
     bar.appendChild(addBtn);
+
+    const viewToggle=document.createElement('button');
+    viewToggle.type='button';
+    viewToggle.className='project-chip view-toggle';
+    viewToggle.style.cssText='margin-left:auto;font-size:10px;padding:2px 7px;opacity:0.8;cursor:pointer;';
+    const isProjectMode = _getSidebarGroupMode() === 'project';
+    viewToggle.title = isProjectMode ? 'Grouped by Project (click to group by Date)' : 'Grouped by Date (click to group by Project)';
+    viewToggle.textContent = isProjectMode ? '⊞ Project' : '📅 Date';
+    viewToggle.onclick = (e) => {
+      e.stopPropagation();
+      const nextMode = _getSidebarGroupMode() === 'project' ? 'date' : 'project';
+      _setSidebarGroupMode(nextMode);
+      renderSessionListFromCache();
+    };
+    bar.appendChild(viewToggle);
+
     list.appendChild(bar);
   }
   // Profile filter toggle (show sessions from other profiles).
@@ -10532,19 +10578,61 @@ function renderSessionListFromCache(){
       if(typeof console!=='undefined'&&console.warn) console.warn('hermes: date-group collapse state could not be persisted', e);
     }
   };
-  // Group sessions by date
+  // Group sessions by project or by date
+  const groupMode = _getSidebarGroupMode();
   const groups=[];
-  let curLabel=null,curItems=[];
   if(pinned.length) groups.push({label:'\u2605 Pinned',items:pinned,isPinned:true});
-  for(const s of unpinned){
-    const ts=_sessionSortTimestampMs(s);
-    const label=_sessionTimeBucketLabel(ts, now);
-    if(label!==curLabel){
-      if(curItems.length) groups.push({label:curLabel,items:curItems});
-      curLabel=label;curItems=[s];
-    } else { curItems.push(s); }
+
+  if (groupMode === 'project' && (_allProjects.length > 0 || hasUnprojected)) {
+    const projectBuckets = new Map();
+    for (const p of _allProjects) {
+      projectBuckets.set(p.project_id, { project: p, items: [] });
+    }
+    const unassignedItems = [];
+    for (const s of unpinned) {
+      const pid = projectIdFor(s);
+      if (pid && projectBuckets.has(pid)) {
+        projectBuckets.get(pid).items.push(s);
+      } else {
+        unassignedItems.push(s);
+      }
+    }
+    const activeBuckets = Array.from(projectBuckets.values()).filter(b => b.items.length > 0);
+    activeBuckets.sort((a, b) => {
+      const aTime = a.items.length ? _sessionSortTimestampMs(a.items[0]) : 0;
+      const bTime = b.items.length ? _sessionSortTimestampMs(b.items[0]) : 0;
+      return bTime - aTime;
+    });
+    for (const b of activeBuckets) {
+      groups.push({
+        label: b.project.name,
+        projectId: b.project.project_id,
+        color: b.project.color,
+        items: b.items,
+        isProject: true,
+      });
+    }
+    if (unassignedItems.length > 0) {
+      groups.push({
+        label: t('project_chip_unassigned') || 'Unassigned',
+        projectId: NO_PROJECT_FILTER,
+        items: unassignedItems,
+        isUnassigned: true,
+        isProject: true,
+      });
+    }
+  } else {
+    let curLabel=null,curItems=[];
+    for(const s of unpinned){
+      const ts=_sessionSortTimestampMs(s);
+      const label=_sessionTimeBucketLabel(ts, now);
+      if(label!==curLabel){
+        if(curItems.length) groups.push({label:curLabel,items:curItems});
+        curLabel=label;curItems=[s];
+      } else { curItems.push(s); }
+    }
+    if(curItems.length) groups.push({label:curLabel,items:curItems});
   }
-  if(curItems.length) groups.push({label:curLabel,items:curItems});
   const flatSessionRows=[];
   for(const g of groups){
     if(_groupCollapsed[g.label]) continue;
@@ -10607,15 +10695,52 @@ function renderSessionListFromCache(){
   let globalSessionRowIndex=0;
   for(const g of groups){
     const wrapper=document.createElement('div');
-    wrapper.className='session-date-group';
+    wrapper.className='session-date-group'+(g.isProject?' session-project-group':'');
     const hdr=document.createElement('div');
-    hdr.className='session-date-header'+(g.isPinned?' pinned':'');
+    hdr.className='session-date-header'+(g.isPinned?' pinned':'')+(g.isProject?' project-header':'');
     const caret=document.createElement('span');
     caret.className='session-date-caret';
     caret.textContent='\u25BE'; // down when expanded; rotated right when collapsed
+    hdr.appendChild(caret);
+
+    if(g.isProject && g.color){
+      const dot=document.createElement('span');
+      dot.className='color-dot';
+      dot.style.cssText=`width:8px;height:8px;border-radius:50%;display:inline-block;flex-shrink:0;background:${g.color};margin:0 4px 0 2px;`;
+      hdr.appendChild(dot);
+    } else if(g.isUnassigned){
+      const dot=document.createElement('span');
+      dot.style.cssText='width:8px;height:8px;border-radius:50%;display:inline-block;flex-shrink:0;border:1px dashed var(--muted);margin:0 4px 0 2px;';
+      hdr.appendChild(dot);
+    }
+
     const label=document.createElement('span');
+    label.className='session-group-label';
     label.textContent=g.label;
-    hdr.appendChild(caret);hdr.appendChild(label);
+    label.style.cssText='overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;';
+    hdr.appendChild(label);
+
+    const count=document.createElement('span');
+    count.className='session-group-count';
+    count.textContent=String(g.items.length);
+    count.style.cssText='font-size:9px;opacity:0.6;margin-left:auto;padding:1px 6px;background:var(--border2);border-radius:8px;flex-shrink:0;';
+    hdr.appendChild(count);
+
+    if(g.projectId && g.projectId !== NO_PROJECT_FILTER){
+      const addBtn=document.createElement('button');
+      addBtn.type='button';
+      addBtn.className='session-group-add-btn';
+      addBtn.textContent='+';
+      addBtn.title=`New chat in ${g.label}`;
+      addBtn.style.cssText='background:none;border:none;color:var(--muted);cursor:pointer;font-size:13px;padding:0 4px;margin-left:4px;border-radius:4px;line-height:1;opacity:0.7;flex-shrink:0;';
+      addBtn.onclick=(e)=>{
+        e.stopPropagation();
+        newSession({ project_id: g.projectId });
+      };
+      addBtn.onmouseenter=()=>{ addBtn.style.opacity='1'; addBtn.style.color='var(--text)'; };
+      addBtn.onmouseleave=()=>{ addBtn.style.opacity='0.7'; addBtn.style.color='var(--muted)'; };
+      hdr.appendChild(addBtn);
+    }
     const body=document.createElement('div');
     body.className='session-date-body';
     const isGroupCollapsed=Boolean(_groupCollapsed[g.label]);

@@ -50,6 +50,7 @@ _SIDEBAR_SESSION_RESPONSE_FIELDS = {
     "display_title",
     "_state_db_title",
     "workspace",
+    "cwd",
     "model",
     "model_provider",
     "message_count",

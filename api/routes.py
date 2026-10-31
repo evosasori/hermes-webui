@@ -3113,9 +3113,11 @@ def _build_session_list_cache_payload(
                 if s.get("session_id") != meta.get("session_id"):
                     s["session_id"] = meta.get("session_id")
             else:
-                for key in ("source_tag", "raw_source", "session_source", "source_label"):
+                for key in ("source_tag", "raw_source", "session_source", "source_label", "project_id", "cwd"):
                     if not s.get(key) and meta.get(key):
                         s[key] = meta[key]
+                if meta.get("cwd") and s.get("workspace") in (None, "/workspace", ""):
+                    s["workspace"] = meta["cwd"]
         webui_sessions = [_normalize_sidebar_source_flags(s) for s in webui_sessions]
         # Apply the same CLI visibility semantics to imported local copies so
         # low-value imported artifacts do not leak into the sidebar.
@@ -18847,16 +18849,22 @@ def handle_post(handler, parsed) -> bool:
             return bad(handler, str(e), 500)
 
     if parsed.path == "/api/admin/reload":
-        # Hot-reload api.models module to pick up code changes without restart.
-        import importlib
+        # Hot-reload api modules to pick up code changes without restart.
+        import importlib, sys
+        from api import agent_sessions as _agent_sessions
+        importlib.reload(_agent_sessions)
         from api import models as _models
         importlib.reload(_models)
-        # Also re-expose get_session from the reloaded module so routes.py
-        # continues to work (routes.py imported it at module level).
         import api.routes as _routes
-        _routes.get_session = _models.get_session
-        _routes.Session = _models.Session
-        return j(handler, {"status": "ok", "reloaded": "api.models"})
+        importlib.reload(_routes)
+        server_mod = sys.modules.get('server')
+        if server_mod:
+            for fn in ('handle_get', 'handle_post', 'handle_put', 'handle_delete', 'handle_patch'):
+                if hasattr(_routes, fn):
+                    setattr(server_mod, fn, getattr(_routes, fn))
+        from api.route_session_list_cache import _session_list_cache_clear
+        _session_list_cache_clear()
+        return j(handler, {"status": "ok", "reloaded": ["api.agent_sessions", "api.models", "api.routes"]})
 
     if parsed.path == "/api/sessions/cleanup":
         return _handle_sessions_cleanup(handler, body, zero_only=False)

@@ -715,7 +715,7 @@ def _project_agent_session_rows(rows: list[dict]) -> list[dict]:
         # expects from "Show agent sessions" sorted by activity.
         for key in (
             'id', 'model', 'message_count', 'actual_message_count', 'actual_user_message_count',
-            'ended_at', 'end_reason', 'last_activity', 'archived',
+            'ended_at', 'end_reason', 'last_activity', 'archived', 'cwd',
         ):
             if key in tip:
                 merged[key] = tip[key]
@@ -886,6 +886,7 @@ def read_importable_agent_session_rows(
         platform_expr = _optional_col('platform', session_cols)
         archived_expr = _optional_col('archived', session_cols)
         project_id_expr = _optional_col('project_id', session_cols)
+        cwd_expr = _optional_col('cwd', session_cols)
         # Older/minimal state.db schemas can have NO ``messages`` table at all,
         # or a ``messages`` table without a ``session_id`` / ``timestamp`` column.
         # The projection SQL below joins ``messages`` and aggregates
@@ -1082,6 +1083,7 @@ def read_importable_agent_session_rows(
                    {origin_user_id_expr},
                    {platform_expr},
                    {project_id_expr},
+                   {cwd_expr},
                    {parent_expr},
                    {ended_expr},
                    {end_reason_expr},
@@ -1549,7 +1551,7 @@ def read_session_lineage_metadata(db_path: Path, session_ids: list[str] | set[st
                     placeholders = ','.join('?' * len(chunk))
                     cur.execute(
                         f"""
-                        SELECT s.id, {source_expr}, {session_source_expr}, {model_config_expr}, s.title, s.started_at, s.parent_session_id, s.ended_at, s.end_reason, {message_count_expr}, {identity_exprs}
+                        SELECT s.id, {source_expr}, {session_source_expr}, {model_config_expr}, s.title, s.started_at, s.parent_session_id, s.ended_at, s.end_reason, {message_count_expr}, {identity_exprs}, {cwd_expr}
                         FROM sessions s
                         WHERE s.id IN ({placeholders})
                         """,
@@ -1578,7 +1580,7 @@ def read_session_lineage_metadata(db_path: Path, session_ids: list[str] | set[st
                     placeholders = ','.join('?' * len(chunk))
                     cur.execute(
                         f"""
-                        SELECT s.id, {source_expr}, {session_source_expr}, {model_config_expr}, s.title, s.started_at, s.parent_session_id, s.ended_at, s.end_reason, {message_count_expr}, {identity_exprs}
+                        SELECT s.id, {source_expr}, {session_source_expr}, {model_config_expr}, s.title, s.started_at, s.parent_session_id, s.ended_at, s.end_reason, {message_count_expr}, {identity_exprs}, {cwd_expr}
                         FROM sessions s
                         WHERE s.parent_session_id IN ({placeholders})
                         """,
