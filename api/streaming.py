@@ -1504,6 +1504,8 @@ def _webui_surface_context_prompt(surface_context: Optional[dict]) -> str:
         ("source", "Source"),
         ("profile", "Profile"),
         ("workspace", "Workspace"),
+        ("project_name", "Active Project"),
+        ("project_folders", "Project Folders"),
     )
     for key, label in fields:
         raw = surface_context.get(key)
@@ -16100,8 +16102,28 @@ def _run_agent_streaming(
             # switches still reach the model via the [Workspace::v1: ...] tag on
             # the current user turn (workspace_ctx above), which lives in msg[-1].
             _session_workspace_frozen = getattr(s, 'created_workspace', None) or str(s.workspace)
+            _project_info = None
+            _project_id = getattr(s, 'project_id', None)
+            if _project_id:
+                try:
+                    from api.models import load_projects
+                    _projects = load_projects()
+                    _project_info = next((p for p in _projects if p.get('project_id') == _project_id), None)
+                except Exception:
+                    _project_info = None
+
+            project_lines = []
+            if _project_info:
+                pname = _project_info.get('name') or _project_id
+                pfolders = _project_info.get('workspaces') or []
+                project_lines.append(f"Active project: {pname}")
+                if pfolders:
+                    project_lines.append(f"Project defined folders: {', '.join(pfolders)}")
+                    project_lines.append("Use these project defined folders as the primary context for files, models, and codebase tasks.")
+
+            proj_msg = ("\n" + "\n".join(project_lines)) if project_lines else ""
             workspace_system_msg = (
-                f"Active workspace at session start: {_session_workspace_frozen}\n"
+                f"Active workspace at session start: {_session_workspace_frozen}{proj_msg}\n"
                 "Every user message is prefixed with [Workspace::v1: /absolute/path] indicating the "
                 "workspace the user has selected in the web UI at the time they sent that message. "
                 "This tag is the single authoritative source of the active workspace and updates "
@@ -16143,6 +16165,8 @@ def _run_agent_streaming(
                     # workspace_system_msg above. Live workspace switches stay out
                     # of msg[0] so LLM prefix caches are not invalidated.
                     'workspace': _session_workspace_frozen,
+                    'project_name': _project_info.get('name') if _project_info else None,
+                    'project_folders': ", ".join(_project_info.get('workspaces') or []) if _project_info else None,
                 },
                 config_data=_cfg,
             )

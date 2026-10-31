@@ -1870,6 +1870,44 @@
   .session-date-header.project-header{text-transform:none;letter-spacing:normal;font-size:11px;font-weight:600;padding:8px 10px 4px;}
   .session-date-header.project-header:hover .session-group-add-btn{opacity:1;}
 
+  .titlebar-project-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: .02em;
+    padding: 2px 7px;
+    border-radius: 4px;
+    background: var(--hover-bg);
+    border: 1px solid var(--border2);
+    color: var(--muted);
+    cursor: pointer;
+    margin-left: 5px;
+    white-space: nowrap;
+    flex-shrink: 0 !important;
+    vertical-align: middle;
+    transition: all 0.15s;
+    -webkit-tap-highlight-color: transparent;
+    box-sizing: border-box;
+    font-family: inherit;
+  }
+  .titlebar-project-badge:hover {
+    background: var(--surface);
+    color: var(--text);
+    border-color: var(--border);
+  }
+  .titlebar-project-badge.has-project {
+    background: var(--hover-bg);
+    color: var(--text);
+    border-color: var(--border);
+  }
+  .titlebar-project-badge.no-project {
+    color: var(--muted);
+    border-style: dashed;
+    opacity: 0.85;
+  }
+
   /* ── Batch select mode ── */
   .session-select-toggle{font-size:11px;padding:6px 10px;color:var(--muted);cursor:pointer;text-align:center;opacity:.6;transition:opacity .15s;user-select:none;margin-top:4px;border-radius:6px;}
   .session-select-toggle:hover{opacity:1;background:var(--hover-bg);}
@@ -3319,9 +3357,10 @@
     .app-titlebar{height:52px;justify-content:space-between;}
     .app-titlebar-hamburger,.app-titlebar-spacer{display:flex;}
     .app-titlebar-new-chat,.app-titlebar-reload{display:inline-flex;width:44px;height:44px;}
-    .app-titlebar-inner{flex:1 1 auto;}
-    .app-titlebar-title{max-width:72vw;}
-    .app-titlebar-sub{font-size:9px;padding:1px 5px;}
+    .app-titlebar-inner{flex:1 1 auto;min-width:0;gap:6px;}
+    .app-titlebar-title{max-width:min(110px, 30vw);overflow:hidden;text-overflow:ellipsis;flex-shrink:1;}
+    .app-titlebar-sub{font-size:9px;padding:1px 5px;flex-shrink:0;}
+    .titlebar-project-badge{font-size:9px;padding:1px 6px;height:18px;line-height:18px;}
     .app-titlebar-title.long-pressing{opacity:.6;transition:opacity .1s;}
     .system-health-panel.insights-card{gap:10px;padding:12px;}
     .system-health-head{align-items:flex-start;}

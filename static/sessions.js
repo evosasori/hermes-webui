@@ -2343,6 +2343,10 @@ function _setNewSessionPending(pending){
 }
 
 async function newSession(flash, options={}){
+  if(flash && typeof flash === 'object'){
+    options = Object.assign({}, flash, options);
+    flash = false;
+  }
   if(_newSessionInFlight){
     if(typeof showToast==='function') showToast(_newSessionPendingText(),1500);
     return _newSessionInFlight;
@@ -10735,7 +10739,7 @@ function renderSessionListFromCache(){
       addBtn.style.cssText='background:none;border:none;color:var(--muted);cursor:pointer;font-size:13px;padding:0 4px;margin-left:4px;border-radius:4px;line-height:1;opacity:0.7;flex-shrink:0;';
       addBtn.onclick=(e)=>{
         e.stopPropagation();
-        newSession({ project_id: g.projectId });
+        newSession(false, { project_id: g.projectId });
       };
       addBtn.onmouseenter=()=>{ addBtn.style.opacity='1'; addBtn.style.color='var(--text)'; };
       addBtn.onmouseleave=()=>{ addBtn.style.opacity='0.7'; addBtn.style.color='var(--muted)'; };
@@ -14166,6 +14170,33 @@ function _showProjectContextMenu(e, proj, chip){
   menu.style.cssText='position:fixed;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:6px 0;z-index:9999;min-width:140px;box-shadow:0 4px 16px rgba(0,0,0,.35);';
   menu.style.left=e.clientX+'px';
   menu.style.top=e.clientY+'px';
+
+  // New session / conversation in this project
+  const createItem=document.createElement('div');
+  const createLabel=(typeof t==='function'&&t('new_conversation'))?t('new_conversation'):'New conversation';
+  createItem.innerHTML=`<span style="display:inline-flex;align-items:center;gap:6px;font-weight:600;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>${createLabel}</span>`;
+  createItem.style.cssText='padding:8px 14px;cursor:pointer;font-size:13px;color:var(--text);display:flex;align-items:center;';
+  createItem.onmouseenter=()=>createItem.style.background='var(--hover-bg)';
+  createItem.onmouseleave=()=>createItem.style.background='';
+  createItem.onclick=async()=>{
+    menu.remove();
+    const bindings=(typeof _projectBindingsForNewSession==='function')?_projectBindingsForNewSession(proj):{};
+    _setActiveProjectFilter(proj.project_id);
+    try{
+      await newSession(false,Object.assign({project_id:proj.project_id},bindings));
+      if(typeof renderSessionListFromCache==='function') renderSessionListFromCache();
+      if(typeof renderSessionList==='function') void renderSessionList({deferWhileInteracting:false});
+      if(typeof closeMobileSidebar==='function') closeMobileSidebar();
+      if(typeof $==='function'&&$('msg')) $('msg').focus();
+    }catch(err){
+      showToast('Could not start new conversation: '+(err.message||err));
+    }
+  };
+  menu.appendChild(createItem);
+
+  const topSep=document.createElement('hr');
+  topSep.style.cssText='border:none;border-top:1px solid var(--border);margin:4px 0;';
+  menu.appendChild(topSep);
 
   // Rename option
   const renameItem=document.createElement('div');

@@ -97,6 +97,54 @@ function syncAppTitlebar() {
     else { subEl.textContent = ''; subEl.hidden = true; }
   }
 
+  const projectBadge = document.getElementById('titlebarProjectBadge') || (() => {
+    const el = document.createElement('button');
+    el.id = 'titlebarProjectBadge';
+    el.type = 'button';
+    el.className = 'titlebar-project-badge';
+    el.onclick = (e) => {
+      e.stopPropagation();
+      if (typeof _showProjectPicker === 'function' && S && S.session) {
+        _showProjectPicker(S.session, el);
+      }
+    };
+    if (subEl && subEl.parentNode) {
+      subEl.parentNode.insertBefore(el, subEl.nextSibling);
+    }
+    return el;
+  })();
+
+  if (projectBadge) {
+    if (panel === 'chat' && typeof S !== 'undefined' && S && S.session) {
+      let proj = null;
+      if (S.session.project_id && typeof _allProjects !== 'undefined' && Array.isArray(_allProjects)) {
+        proj = _allProjects.find(p => p.project_id === S.session.project_id);
+      }
+      projectBadge.style.display = 'inline-flex';
+      projectBadge.innerHTML = '';
+      if (proj) {
+        projectBadge.className = 'titlebar-project-badge has-project';
+        if (proj.color) {
+          const dot = document.createElement('span');
+          dot.style.cssText = `width:6px;height:6px;border-radius:50%;background:${proj.color};display:inline-block;flex-shrink:0;`;
+          projectBadge.appendChild(dot);
+        }
+        const nameSpan = document.createElement('span');
+        nameSpan.textContent = proj.name;
+        projectBadge.appendChild(nameSpan);
+        projectBadge.title = `Project: ${proj.name} (tap to change)`;
+      } else {
+        projectBadge.className = 'titlebar-project-badge no-project';
+        const nameSpan = document.createElement('span');
+        nameSpan.textContent = 'No project';
+        projectBadge.appendChild(nameSpan);
+        projectBadge.title = 'Assign to a project';
+      }
+    } else {
+      projectBadge.style.display = 'none';
+    }
+  }
+
   // Double-click on the titlebar title → rename the active session (same behaviour
   // as double-clicking a session title in the sidebar).  Only active on the chat
   // panel when a session is open.

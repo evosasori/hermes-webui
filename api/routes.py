@@ -3116,8 +3116,6 @@ def _build_session_list_cache_payload(
                 for key in ("source_tag", "raw_source", "session_source", "source_label", "project_id", "cwd"):
                     if not s.get(key) and meta.get(key):
                         s[key] = meta[key]
-                if meta.get("cwd") and s.get("workspace") in (None, "/workspace", ""):
-                    s["workspace"] = meta["cwd"]
         webui_sessions = [_normalize_sidebar_source_flags(s) for s in webui_sessions]
         # Apply the same CLI visibility semantics to imported local copies so
         # low-value imported artifacts do not leak into the sidebar.
@@ -15749,6 +15747,23 @@ _INDEX_SHELL_CACHE: dict = {}
 _INDEX_SHELL_CACHE_LOCK = threading.Lock()
 
 
+def _get_active_version_token() -> str:
+    version_file = api_config.REPO_ROOT / 'api' / '_version.py'
+    ver = 'v0.52.3'
+    if version_file.exists():
+        try:
+            import re
+            m = re.search(r"""__version__\s*=\s*['"]([^'"]+)['"]""", version_file.read_text(encoding='utf-8'))
+            if m and m.group(1) != 'unknown':
+                ver = m.group(1)
+        except Exception:
+            pass
+    import sys
+    if 'api.updates' in sys.modules:
+        sys.modules['api.updates'].WEBUI_VERSION = ver
+    return ver
+
+
 def _render_index_shell_base() -> str:
     """Return static/index.html with the process-constant tokens substituted.
 
@@ -15756,18 +15771,17 @@ def _render_index_shell_base() -> str:
     extension-tag injection are intentionally NOT applied here — they vary per
     request and are applied by the caller against this base string.
     """
-    from api.updates import WEBUI_VERSION
-
+    version_str = _get_active_version_token()
     index_path = api_config.get_index_html_path()
     st = index_path.stat()
-    sig = (index_path, st.st_size, st.st_mtime_ns)
+    sig = (index_path, st.st_size, st.st_mtime_ns, version_str)
     with _INDEX_SHELL_CACHE_LOCK:
         cached = _INDEX_SHELL_CACHE.get("base")
         if cached and cached[0] == sig:
             return cached[1]
     from urllib.parse import quote
 
-    version_token = quote(WEBUI_VERSION, safe="")
+    version_token = quote(version_str, safe="")
     base = (
         index_path.read_text(encoding="utf-8")
         .replace("__WEBUI_VERSION__", version_token)
@@ -16729,8 +16743,8 @@ def handle_get(handler, parsed) -> bool:
             # Inject the current git-derived version as the cache name so the
             # service worker cache busts automatically on every new deploy.
             from urllib.parse import quote
-            from api.updates import WEBUI_VERSION
-            version_token = quote(WEBUI_VERSION, safe="")
+            version_str = _get_active_version_token()
+            version_token = quote(version_str, safe="")
             text = sw_path.read_text(encoding="utf-8").replace(
                 "__WEBUI_VERSION__", version_token
             )
@@ -18011,29 +18025,40 @@ def _resolve_new_session_workspace(body, visible_prev_session_id, profile=None):
         except TypeError:
             return resolve_trusted_workspace(value)
 
-    if (
-        body.get("workspace_inherited_from_prev_session") is not True
-        or not visible_prev_session_id
-    ):
-        return str(_rtw(candidate))
     try:
-        previous_session = get_session(visible_prev_session_id, metadata_only=True)
-    except KeyError:
-        return str(_rtw(candidate))
-    if str(getattr(previous_session, "workspace", None) or "") != str(candidate):
-        return str(_rtw(candidate))
-    try:
-        workspace, _recovered = resolve_implicit_workspace_with_recovery(
+        if (
+            body.get("workspace_inherited_from_prev_session") is not True
+            or not visible_prev_session_id
+        ):
+            return str(_rtw(candidate))
+        try:
+            previous_session = get_session(visible_prev_session_id, metadata_only=True)
+        except KeyError:
+            return str(_rtw(candidate))
+        if str(getattr(previous_session, "workspace", None) or "") != str(candidate):
+            return str(_rtw(candidate))
+        try:
+            workspace, _recovered = resolve_implicit_workspace_with_recovery(
+                candidate,
+                get_last_workspace,
+                profile=profile,
+            )
+        except TypeError:
+            workspace, _recovered = resolve_implicit_workspace_with_recovery(
+                candidate,
+                get_last_workspace,
+            )
+        return str(workspace)
+    except (ValueError, OSError) as e:
+        logger.warning(
+            "New session candidate workspace %r is invalid on this host/container (%s); falling back to default",
             candidate,
-            get_last_workspace,
-            profile=profile,
+            e,
         )
-    except TypeError:
-        workspace, _recovered = resolve_implicit_workspace_with_recovery(
-            candidate,
-            get_last_workspace,
-        )
-    return str(workspace)
+        try:
+            return str(_rtw(None))
+        except Exception:
+            return "/workspace"
 
 
 def _llm_update_summary(system_prompt: str, user_prompt: str, active_profile: str | None = None) -> str:
@@ -18851,20 +18876,28 @@ def handle_post(handler, parsed) -> bool:
     if parsed.path == "/api/admin/reload":
         # Hot-reload api modules to pick up code changes without restart.
         import importlib, sys
+        from api import updates as _updates
+        importlib.reload(_updates)
         from api import agent_sessions as _agent_sessions
         importlib.reload(_agent_sessions)
         from api import models as _models
         importlib.reload(_models)
         import api.routes as _routes
         importlib.reload(_routes)
-        server_mod = sys.modules.get('server')
-        if server_mod:
-            for fn in ('handle_get', 'handle_post', 'handle_put', 'handle_delete', 'handle_patch'):
-                if hasattr(_routes, fn):
-                    setattr(server_mod, fn, getattr(_routes, fn))
+        for mod_name, mod in list(sys.modules.items()):
+            if mod and hasattr(mod, 'handle_get'):
+                setattr(mod, 'handle_get', _routes.handle_get)
+            if mod and hasattr(mod, 'handle_post'):
+                setattr(mod, 'handle_post', _routes.handle_post)
+            if mod and hasattr(mod, 'WEBUI_VERSION'):
+                setattr(mod, 'WEBUI_VERSION', _updates.WEBUI_VERSION)
         from api.route_session_list_cache import _session_list_cache_clear
         _session_list_cache_clear()
-        return j(handler, {"status": "ok", "reloaded": ["api.agent_sessions", "api.models", "api.routes"]})
+        with _INDEX_SHELL_CACHE_LOCK:
+            _INDEX_SHELL_CACHE.clear()
+        with _STATIC_CACHE_LOCK:
+            _STATIC_CACHE.clear()
+        return j(handler, {"status": "ok", "version": _updates.WEBUI_VERSION, "reloaded": ["api.updates", "api.agent_sessions", "api.models", "api.routes"]})
 
     if parsed.path == "/api/sessions/cleanup":
         return _handle_sessions_cleanup(handler, body, zero_only=False)
