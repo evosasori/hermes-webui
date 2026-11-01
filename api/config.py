@@ -10696,6 +10696,15 @@ def get_available_models(*, prefer_cache: bool = False, force_refresh: bool = Fa
                             if api_key:
                                 break
             if not api_key:
+                _ke = (model_cfg.get("key_env") if isinstance(model_cfg, dict) else "")
+                if not _ke and isinstance(providers_cfg, dict):
+                    for provider_key in filter(None, [active_provider, "custom"]):
+                        _ke = providers_cfg.get(provider_key, {}).get("key_env")
+                        if _ke:
+                            break
+                if _ke:
+                    api_key = (all_env.get(_ke) or os.environ.get(_ke) or _thread_local_env_value(_ke) or "").strip()
+            if not api_key:
                 api_key_vars = (
                     "HERMES_API_KEY",
                     "HERMES_OPENAI_API_KEY",
@@ -11354,6 +11363,7 @@ def get_available_models(*, prefer_cache: bool = False, force_refresh: bool = Fa
                     _uses_models_as_settings_map = (
                         pid == "copilot"
                         or _provider_models_are_discovered_catalog(provider_cfg)
+                        or (pid == "custom" and _provider_discover_allowed(provider_cfg) and isinstance(provider_cfg.get("models"), dict))
                     )
                     if (
                         not _uses_models_as_settings_map
@@ -11398,6 +11408,8 @@ def get_available_models(*, prefer_cache: bool = False, force_refresh: bool = Fa
                     detected_models = auto_detected_models_by_provider.get(pid, [])
                     if detected_models and not raw_models:
                         raw_models = copy.deepcopy(detected_models)
+                    if not raw_models and isinstance(provider_cfg, dict) and "models" in provider_cfg:
+                        raw_models = _configured_model_options(provider_cfg.get("models"))
                     _append_picker_group(provider_name, pid, raw_models)
                 else:
                     detected_models = auto_detected_models_by_provider.get(pid)
