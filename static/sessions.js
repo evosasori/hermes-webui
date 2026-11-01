@@ -3721,8 +3721,9 @@ function _isCliSession(session) {
 
 function _sessionSourceLabel(filter, count) {
   const n = Number(count) || 0;
-  if (filter === 'all') return (window.t ? window.t('sessions_source_all', n) : 'All') + ` (${n})`;
-  return filter === 'cli' ? t('sessions_source_cli', n) : t('sessions_source_webui', n);
+  if (filter === 'all') return `All (${n})`;
+  if (filter === 'cli') return `CLI (${n})`;
+  return `WebUI (${n})`;
 }
 
 function _clearSessionSourceTabCounts() {
