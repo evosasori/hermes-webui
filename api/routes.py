@@ -3862,7 +3862,13 @@ def _clear_stale_stream_state(session, *, wait_for_writer: bool = False) -> bool
                 run_entry = dict((_live_config.ACTIVE_RUNS or {}).get(stream_id) or {})
         except Exception:
             run_entry = {}
-        if not _cancelled_run_is_stale(run_entry):
+        _run_started = float(run_entry.get("started_at") or 0)
+        _run_phase = str(run_entry.get("phase") or "").strip()
+        _is_abandoned_run = (
+            (_run_phase == "finalizing" and (time.time() - _run_started) > 10.0)
+            or ((time.time() - _run_started) > 45.0)
+        )
+        if not _cancelled_run_is_stale(run_entry) and not _is_abandoned_run:
             logger.debug(
                 "_clear_stale_stream_state: stream %s for session %s missing SSE channel "
                 "but worker bookkeeping is still active; deferring stale cleanup",
@@ -3870,12 +3876,19 @@ def _clear_stale_stream_state(session, *, wait_for_writer: bool = False) -> bool
                 getattr(session, "session_id", "?"),
             )
             return False
+        # If the run was abandoned/finalized or stale cancelled, release it from ACTIVE_RUNS
+        try:
+            with _live_config.ACTIVE_RUNS_LOCK:
+                (_live_config.ACTIVE_RUNS or {}).pop(stream_id, None)
+        except Exception:
+            pass
         logger.info(
             "_clear_stale_stream_state: stream %s for session %s missing SSE channel and "
-            "cancelled run is stale (cancelled_at=%s); clearing stale stream state (#6623)",
+            "run is stale (phase=%s, started_at=%s); clearing stale stream state",
             stream_id,
             getattr(session, "session_id", "?"),
-            run_entry.get("cancelled_at"),
+            _run_phase,
+            run_entry.get("started_at"),
         )
     grace_seconds = 30.0
     try:
@@ -15235,18 +15248,27 @@ def _run_lifecycle_health() -> dict:
     now = time.time()
     with _live_config.ACTIVE_RUNS_LOCK:
         runs = []
-        for _stream_id, raw in (_live_config.ACTIVE_RUNS or {}).items():
+        dead_run_ids = []
+        for _stream_id, raw in list((_live_config.ACTIVE_RUNS or {}).items()):
             item = dict(raw or {})
-            item.pop("session_id", None)
-            item.pop("stream_id", None)
-            item.pop("workspace", None)
             started_at = item.get("started_at")
             try:
                 age = max(0.0, now - float(started_at))
             except Exception:
                 age = 0.0
+            phase = str(item.get("phase") or "").strip()
+            # If a run is in 'finalizing' past 15s or older than 60s without SSE, prune it
+            if (phase == "finalizing" and age > 15.0) or (age > 60.0 and _stream_id not in _live_config.STREAMS):
+                dead_run_ids.append(_stream_id)
+                continue
+            item.pop("session_id", None)
+            item.pop("stream_id", None)
+            item.pop("workspace", None)
             item["age_seconds"] = round(age, 1)
             runs.append(item)
+        for _dead_id in dead_run_ids:
+            (_live_config.ACTIVE_RUNS or {}).pop(_dead_id, None)
+            unregister_stream_owner(_dead_id)
         last_finished = _live_config.LAST_RUN_FINISHED_AT
     runs.sort(key=lambda item: float(item.get("started_at") or 0.0))
     payload = {
@@ -18899,6 +18921,18 @@ def handle_post(handler, parsed) -> bool:
             _INDEX_SHELL_CACHE.clear()
         with _STATIC_CACHE_LOCK:
             _STATIC_CACHE.clear()
+        # Clean up any orphaned / zombie runs in ACTIVE_RUNS
+        try:
+            _now = time.time()
+            for _mod in list(sys.modules.values()):
+                if hasattr(_mod, 'ACTIVE_RUNS') and isinstance(getattr(_mod, 'ACTIVE_RUNS'), dict):
+                    _runs = getattr(_mod, 'ACTIVE_RUNS')
+                    for _k, _v in list(_runs.items()):
+                        if (_now - float((_v or {}).get("started_at") or 0)) > 60.0:
+                            _runs.pop(_k, None)
+                            unregister_stream_owner(_k)
+        except Exception:
+            pass
         return j(handler, {"status": "ok", "version": _updates.WEBUI_VERSION, "reloaded": ["api.updates", "api.agent_sessions", "api.models", "api.streaming", "api.routes"]})
 
     if parsed.path == "/api/sessions/cleanup":

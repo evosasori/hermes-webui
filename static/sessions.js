@@ -1663,9 +1663,12 @@ function _reconcileActiveSessionIdleStateFromList(serverRows) {
   return changed;
 }
 
+let _activeSessionIdleReloadTimer = null;
 function _scheduleActiveSessionIdleReload(sid) {
   if(!sid) return;
-  setTimeout(async () => {
+  if(_activeSessionIdleReloadTimer) clearTimeout(_activeSessionIdleReloadTimer);
+  _activeSessionIdleReloadTimer = setTimeout(async () => {
+    _activeSessionIdleReloadTimer = null;
     if(!S||!S.session||S.session.session_id !== sid) return;
     // #5409: skip idle reload while any loadSession() is in flight — avoids
     // a race where the idle reload overwrites _loadingSessionId and silently
@@ -1691,10 +1694,10 @@ function _scheduleActiveSessionIdleReload(sid) {
         ignoreStreamJustFinished: true,
       });
       if(outcome === 'failed'){
-        await loadSession(sid, {force:true, externalRefreshReason:'idle-reconcile'});
+        await loadSession(sid, {force:true, externalRefreshReason:'idle-reconcile', keepStaleUntilLoaded:true});
       }
     }catch(_){}
-  },0);
+  }, 1200);
 }
 
 function _purgeStaleInflightEntries() {
@@ -8130,7 +8133,7 @@ async function refreshActiveSessionIfExternallyUpdated(reason){
       // the original behaviour (no DOM is on-screen long enough for the gap
       // to matter, and any change there would have to re-verify their own
       // tradeoffs).
-      const _recoveryReasons = {visible:true, focus:true};
+      const _recoveryReasons = {visible:true, focus:true, 'idle-reconcile':true};
       const _keepStaleUntilLoaded = !!_recoveryReasons[String(reason||'')];
       // #5409: skip force-reload while a different session's loadSession()
       // is in flight — avoids overwriting _loadingSessionId and silently

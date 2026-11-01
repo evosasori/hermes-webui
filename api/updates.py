@@ -656,7 +656,7 @@ def _detect_webui_version() -> str:
     except Exception:
         pass
 
-    return 'v0.52.5'
+    return 'v0.52.6'
 
 
 def _read_agent_source_version(agent_dir: Path) -> str | None:
