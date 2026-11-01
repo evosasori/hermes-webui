@@ -16192,7 +16192,7 @@ def _run_agent_streaming(
                     state_messages=state_snapshot,
                     with_revision=True,
                 )
-                if not isinstance(reconciled_snapshot, StateDBSessionMessagesSnapshot) and not (hasattr(reconciled_snapshot, 'revision') and hasattr(reconciled_snapshot, 'messages')):
+                if not hasattr(reconciled_snapshot, 'messages'):
                     raise TypeError(
                         "state.db context reconciliation did not return a revision snapshot"
                     )

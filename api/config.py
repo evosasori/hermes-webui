@@ -264,7 +264,7 @@ def _env_int_clamped(name: str, default: int, *, minimum: int = 1, maximum: int)
 # Sidebar recency window. Resolved here, before profile init, so a profile
 # .env cannot override a server-wide resource bound. Clamped at 200.
 CLI_VISIBLE_SESSION_LIMIT = _env_int_clamped(
-    "HERMES_WEBUI_VISIBLE_SESSION_LIMIT", 20, maximum=200,
+    "HERMES_WEBUI_VISIBLE_SESSION_LIMIT", 200, maximum=200,
 )
 
 # ── TLS/HTTPS config (optional, env-overridable) ────────────────────────────

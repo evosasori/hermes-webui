@@ -18882,6 +18882,8 @@ def handle_post(handler, parsed) -> bool:
         importlib.reload(_agent_sessions)
         from api import models as _models
         importlib.reload(_models)
+        from api import streaming as _streaming
+        importlib.reload(_streaming)
         import api.routes as _routes
         importlib.reload(_routes)
         for mod_name, mod in list(sys.modules.items()):
@@ -18897,7 +18899,7 @@ def handle_post(handler, parsed) -> bool:
             _INDEX_SHELL_CACHE.clear()
         with _STATIC_CACHE_LOCK:
             _STATIC_CACHE.clear()
-        return j(handler, {"status": "ok", "version": _updates.WEBUI_VERSION, "reloaded": ["api.updates", "api.agent_sessions", "api.models", "api.routes"]})
+        return j(handler, {"status": "ok", "version": _updates.WEBUI_VERSION, "reloaded": ["api.updates", "api.agent_sessions", "api.models", "api.streaming", "api.routes"]})
 
     if parsed.path == "/api/sessions/cleanup":
         return _handle_sessions_cleanup(handler, body, zero_only=False)
