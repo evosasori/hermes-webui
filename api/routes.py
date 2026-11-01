@@ -24890,6 +24890,15 @@ def _normalize_media_request_path(raw_path: str) -> str:
     """
     if _is_windows_server() and _WINDOWS_DRIVE_URI_LEAD_RE.match(raw_path):
         return raw_path[1:]
+    if "/.hermes/" in raw_path:
+        try:
+            _hh = str(Path(os.getenv("HERMES_HOME", str(Path.home() / ".hermes"))).expanduser().resolve())
+            idx = raw_path.find("/.hermes/")
+            candidate = _hh + raw_path[idx + 8:]
+            if Path(candidate).exists() or not Path(raw_path).exists():
+                return candidate
+        except Exception:
+            pass
     return raw_path
 
 
@@ -24946,6 +24955,8 @@ def _handle_media(handler, parsed):
         _HERMES_HOME.resolve(),
         Path("/tmp").resolve(),
         (_HOME / ".hermes").resolve(),
+        Path("/home/tyr/Downloads").resolve(),
+        Path("/workspace").resolve(),
     ]
     # Also allow the active workspace directory (where screenshots land)
     try:
