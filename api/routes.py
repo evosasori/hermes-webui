@@ -15748,8 +15748,8 @@ _INDEX_SHELL_CACHE_LOCK = threading.Lock()
 
 
 def _get_active_version_token() -> str:
-    version_file = api_config.REPO_ROOT / 'api' / '_version.py'
-    ver = 'v0.52.3'
+    version_file = Path(__file__).parent / '_version.py'
+    ver = 'v0.52.5'
     if version_file.exists():
         try:
             import re
