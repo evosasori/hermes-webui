@@ -29,22 +29,6 @@ try:  # pragma: no cover - platform-specific imports.
 except ImportError:  # pragma: no cover
     _msvcrt = None
 
-try:
-    import sys as _sys, importlib as _importlib
-    if "api.config" in _sys.modules:
-        import api.config as _cfg_mod
-        _importlib.reload(_cfg_mod)
-        _cfg_mod._delete_models_cache_on_disk()
-        _cfg_mod.invalidate_provider_models_cache("custom")
-        if "api.routes" in _sys.modules:
-            import api.routes as _routes_mod
-            _routes_mod.get_available_models = _cfg_mod.get_available_models
-            _routes_mod.get_available_models_for_session_visit = _cfg_mod.get_available_models_for_session_visit
-            _routes_mod.invalidate_provider_models_cache = _cfg_mod.invalidate_provider_models_cache
-        print("[hermes-reload] Successfully reloaded api.config and rebound routes functions!", flush=True)
-except Exception as _reload_err:
-    print(f"[hermes-reload] Error reloading api.config: {_reload_err}", flush=True)
-
 import api.config as _cfg
 from api.compression_anchor import is_context_compression_marker
 from api.config import (
@@ -2661,7 +2645,12 @@ class Session:
             **({'truncation_boundary': self.truncation_boundary} if self.truncation_boundary else {}),
             'pinned': self.pinned,
             'archived': self.archived,
-            'project_id': self.project_id,
+            'project_id': (
+                self.project_id
+                or _match_project_id_by_path(self.workspace)
+                or _match_project_id_by_path(_session_cwd_from_state(self.session_id))
+                or _match_project_id_by_text(self.title)
+            ),
             'profile': self.profile,
             'input_tokens': self.input_tokens,
             'output_tokens': self.output_tokens,
@@ -9081,6 +9070,131 @@ def _backfill_project_profiles_if_needed(projects: list) -> bool:
     return mutated
 
 
+# Hot-reload hook: when api.models is reloaded by /api/admin/reload, propagate to routes and server
+try:
+    import sys, importlib
+    if 'api.agent_sessions' in sys.modules:
+        importlib.reload(sys.modules['api.agent_sessions'])
+    if 'api.routes' in sys.modules:
+        importlib.reload(sys.modules['api.routes'])
+    if 'server' in sys.modules:
+        import api.routes as _reloaded_routes
+        for _fn in ('handle_get', 'handle_post', 'handle_put', 'handle_delete', 'handle_patch'):
+            if hasattr(_reloaded_routes, _fn):
+                setattr(sys.modules['server'], _fn, getattr(_reloaded_routes, _fn))
+    if 'api.route_session_list_cache' in sys.modules:
+        importlib.reload(sys.modules['api.route_session_list_cache'])
+except Exception:
+    pass
+
+
+def _sync_projects_from_db(existing_projects: list) -> tuple[list, bool]:
+    """Sync projects from hermes_cli projects.db into WebUI project list."""
+    try:
+        from hermes_cli import projects_db as pdb
+        with pdb.connect_closing() as conn:
+            cli_projects = pdb.list_projects(conn)
+        if not cli_projects:
+            return existing_projects, False
+
+        project_colors = ['#7cb9ff', '#f5c542', '#e94560', '#50c878', '#c084fc', '#fb923c', '#67e8f9', '#f472b6']
+        existing_by_id = {p.get('project_id'): p for p in existing_projects if p.get('project_id')}
+        existing_by_slug = {p.get('slug'): p for p in existing_projects if p.get('slug')}
+        existing_by_name = {p.get('name'): p for p in existing_projects if p.get('name')}
+
+        changed = False
+        result = list(existing_projects)
+        for i, cp in enumerate(cli_projects):
+            target = existing_by_id.get(cp.id) or existing_by_slug.get(cp.slug) or existing_by_name.get(cp.name)
+            folders = [f.path for f in cp.folders] if cp.folders else []
+            if cp.primary_path and cp.primary_path not in folders:
+                folders.insert(0, cp.primary_path)
+
+            if target is None:
+                new_p = {
+                    "project_id": cp.id,
+                    "name": cp.name,
+                    "slug": cp.slug,
+                    "color": cp.color or project_colors[len(result) % len(project_colors)],
+                    "profile": "default",
+                    "workspaces": folders,
+                    "default_workspace": cp.primary_path or (folders[0] if folders else None),
+                    "created_at": cp.created_at,
+                }
+                result.append(new_p)
+                existing_by_id[cp.id] = new_p
+                changed = True
+            else:
+                if not target.get('workspaces') and folders:
+                    target['workspaces'] = folders
+                    changed = True
+                if not target.get('default_workspace') and (cp.primary_path or folders):
+                    target['default_workspace'] = cp.primary_path or folders[0]
+                    changed = True
+                if not target.get('slug'):
+                    target['slug'] = cp.slug
+                    changed = True
+        return result, changed
+    except Exception:
+        return existing_projects, False
+
+
+def _session_cwd_from_state(sid: str) -> str | None:
+    if not sid:
+        return None
+    try:
+        db_path = _active_state_db_path()
+        if not db_path or not db_path.exists():
+            return None
+        with closing(sqlite3.connect(str(db_path))) as conn:
+            c = conn.cursor()
+            row = c.execute("SELECT cwd FROM sessions WHERE id = ?", (sid,)).fetchone()
+            if row and row[0]:
+                return str(row[0])
+    except Exception:
+        pass
+    return None
+
+
+def _match_project_id_by_path(path: str | None) -> str | None:
+    if not path:
+        return None
+    clean = str(path).strip()
+    if not clean:
+        return None
+    best_id = None
+    best_len = 0
+    try:
+        projects = load_projects(_migrate=False)
+    except Exception:
+        return None
+    for p in projects:
+        for w in p.get('workspaces') or []:
+            if clean == w or clean.startswith(w.rstrip('/') + '/'):
+                if len(w) > best_len:
+                    best_len = len(w)
+                    best_id = p.get('project_id')
+    return best_id
+
+
+def _match_project_id_by_text(text: str | None) -> str | None:
+    if not text:
+        return None
+    clean = str(text).lower().replace('_', ' ').replace('-', ' ')
+    try:
+        projects = load_projects(_migrate=False)
+    except Exception:
+        return None
+    for p in projects:
+        slug = str(p.get('slug') or '').lower()
+        name = str(p.get('name') or '').lower()
+        if slug and slug != 'general' and re.search(r'\b' + re.escape(slug) + r'\b', clean):
+            return p.get('project_id')
+        if name and name != 'general' and re.search(r'\b' + re.escape(name) + r'\b', clean):
+            return p.get('project_id')
+    return None
+
+
 def load_projects(*, _migrate: bool = True) -> list:
     """Load project list from disk. Returns list of project dicts.
 
@@ -9089,11 +9203,19 @@ def load_projects(*, _migrate: bool = True) -> list:
     callsites that want the raw on-disk shape (test fixtures, e.g.).
     """
     global _projects_migrated
-    if not PROJECTS_FILE.exists():
-        return []
-    try:
-        projects = json.loads(PROJECTS_FILE.read_text(encoding='utf-8'))
-    except Exception:
+    projects = []
+    if PROJECTS_FILE.exists():
+        try:
+            projects = json.loads(PROJECTS_FILE.read_text(encoding='utf-8'))
+        except Exception:
+            projects = []
+    projects, synced = _sync_projects_from_db(projects)
+    if synced:
+        try:
+            save_projects(projects)
+        except Exception:
+            pass
+    if not projects:
         return []
     if _migrate and not _projects_migrated:
         with _PROJECTS_MIGRATION_LOCK:
@@ -10477,6 +10599,10 @@ def _load_cli_sessions_uncached(
         resolved = _resolved_project_id(row.get('project_id'))
         if resolved is None:
             resolved = _resolved_project_id(_sidecar_row_project_id(sid))
+        if resolved is None and row.get('cwd'):
+            resolved = _match_project_id_by_path(row.get('cwd'))
+        if resolved is None and row.get('title'):
+            resolved = _match_project_id_by_text(row.get('title'))
         return resolved
 
     profile_value = _cli_profile or 'default'
@@ -11087,10 +11213,12 @@ def _load_cli_sessions_uncached(
         else:
             _archived = bool(row.get('archived'))
         _display_title = _title or f'{_source.title()} Session'
+        _session_cwd = row.get('cwd')
         cli_sessions.append({
             'session_id': sid,
             'title': _display_title,
-            'workspace': _cli_workspace(),
+            'workspace': _session_cwd or _cli_workspace(),
+            'cwd': _session_cwd,
             'model': row['model'] or None,
             'message_count': row['message_count'] or row['actual_message_count'] or 0,
             'created_at': row['started_at'],

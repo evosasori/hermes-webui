@@ -3721,6 +3721,7 @@ function _isCliSession(session) {
 
 function _sessionSourceLabel(filter, count) {
   const n = Number(count) || 0;
+  if (filter === 'all') return (window.t ? window.t('sessions_source_all', n) : 'All') + ` (${n})`;
   return filter === 'cli' ? t('sessions_source_cli', n) : t('sessions_source_webui', n);
 }
 
@@ -3730,6 +3731,7 @@ function _clearSessionSourceTabCounts() {
 }
 
 function _requestedSessionSidebarSource() {
+  if (_sessionSourceFilter === 'all') return '';
   return window._showCliSessions ? _sessionSourceFilter : 'webui';
 }
 
@@ -3805,7 +3807,7 @@ function _setSessionSourceFilter(filter) {
 function _restoreSessionSourceFilter() {
   try {
     const raw = localStorage.getItem('hermes-session-source-filter');
-    if (raw === 'cli' || raw === 'webui') _sessionSourceFilter = raw;
+    if (raw === 'cli' || raw === 'webui' || raw === 'all') _sessionSourceFilter = raw;
   } catch (_e) {}
 }
 
@@ -5496,7 +5498,7 @@ let _archivedCliCount = 0;        // archived non-WebUI sessions not fetched unt
 let _archivedRowsLoadedLimit = SESSION_ARCHIVED_PAGE_SIZE;
 let _serverWebuiSessionCount = null;  // explicit server count for WebUI sessions
 let _serverCliSessionCount = null;    // explicit server count for CLI sessions
-let _sessionSourceFilter = 'webui';  // 'webui' keeps WebUI chats separate from read-only CLI sessions
+let _sessionSourceFilter = 'all';  // 'all' shows both WebUI and Agent sessions grouped by project
 
 function _restoreShowAllProfiles(){
   try{
@@ -10353,8 +10355,8 @@ function renderSessionListFromCache(){
   if(window._showCliSessions || cliSessionCount>0){
     const sourceTabs=document.createElement('div');
     sourceTabs.className='session-source-tabs';
-    for(const filter of ['webui','cli']){
-      const count=filter==='cli'?cliSessionTabCount:webuiSessionTabCount;
+    for(const filter of ['all','webui','cli']){
+      const count=filter==='all'?(cliSessionTabCount+webuiSessionTabCount):filter==='cli'?cliSessionTabCount:webuiSessionTabCount;
       const btn=document.createElement('button');
       btn.type='button';
       btn.className='session-source-tab'+(_sessionSourceFilter===filter?' active':'');
