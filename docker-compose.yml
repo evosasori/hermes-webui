@@ -26,6 +26,8 @@ services:
       - ${HERMES_AGENT_DIR:-/home/tyr/Downloads/hermes}:/opt/hermes:ro
       # Your workspace directory shown on first launch (adapt if yours is different, the container will use the mounted /workspace)
       - ${HERMES_WORKSPACE:-${HOME}/workspace}:/workspace
+      # Same-path host project access; edits affect Downloads directly.
+      - /home/tyr/Downloads:/home/tyr/Downloads:rw
     environment:
       # Set to your host user ID: run `id -u` and `id -g` to find them.
       # On macOS, UIDs start at 501 (not 1000), so set UID and GID in a .env file:
