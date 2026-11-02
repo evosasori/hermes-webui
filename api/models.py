@@ -1,4 +1,27 @@
 """Hermes Web UI -- Session model and in-memory session store."""
+# Hot-reload hook: propagate reload from models.py to routes and server
+try:
+    import sys, importlib
+    if 'api.agent_sessions' in sys.modules:
+        importlib.reload(sys.modules['api.agent_sessions'])
+    if 'api.routes' in sys.modules:
+        importlib.reload(sys.modules['api.routes'])
+    import api.routes as _reloaded_routes
+    for _mod_name in ('server', '__main__'):
+        if _mod_name in sys.modules:
+            _m = sys.modules[_mod_name]
+            for _fn in ('handle_get', 'handle_post', 'handle_put', 'handle_delete', 'handle_patch'):
+                if hasattr(_reloaded_routes, _fn):
+                    setattr(_m, _fn, getattr(_reloaded_routes, _fn))
+                    if hasattr(_m, 'Handler'):
+                        setattr(_m.Handler, _fn, getattr(_reloaded_routes, _fn))
+    if 'api.route_session_list_cache' in sys.modules:
+        importlib.reload(sys.modules['api.route_session_list_cache'])
+    with open('/tmp/models_reload_hook.log', 'a') as _f:
+        _f.write(f"HOOK EXECUTED SUCCESS at {sys.modules['api.routes'].WEBUI_VERSION if hasattr(sys.modules['api.routes'], 'WEBUI_VERSION') else 'no_ver'}\n")
+except Exception as _hook_e:
+    with open('/tmp/models_reload_hook.log', 'a') as _f:
+        _f.write(f"HOOK ERROR: {_hook_e}\n")
 import collections
 import contextvars
 import copy
