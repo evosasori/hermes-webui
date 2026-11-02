@@ -342,7 +342,7 @@ if [ "A${whoami}" == "Aroot" ]; then
   echo ""; echo "-- Preparing /app for the hermeswebui runtime user"
   mkdir -p /app || error_exit "Failed to create /app directory"
   chown hermeswebui:hermeswebui /app || error_exit "Failed to set owner of /app to hermeswebui user"
-  rsync -av --chown=hermeswebui:hermeswebui /apptoo/ /app/ || error_exit "Failed to sync /apptoo to /app with correct ownership"
+  rsync -av --chown=hermeswebui:hermeswebui --exclude=api --exclude=static /apptoo/ /app/ || error_exit "Failed to sync /apptoo to /app with correct ownership"
 
   if [ -z "${HERMES_WEBUI_DEFAULT_WORKSPACE+x}" ]; then export HERMES_WEBUI_DEFAULT_WORKSPACE="/workspace"; fi
   if [ ! -d "$HERMES_WEBUI_DEFAULT_WORKSPACE" ]; then

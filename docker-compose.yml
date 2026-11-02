@@ -31,6 +31,12 @@ services:
       # Live mounts for webui code so host changes are permanent across restarts
       - /home/tyr/Downloads/list_docker/hermes-webui/api:/app/api:rw
       - /home/tyr/Downloads/list_docker/hermes-webui/static:/app/static:rw
+      - /home/tyr/Downloads/list_docker/hermes-webui/docker_init.bash:/hermeswebui_init.bash:ro
+      # Host Docker daemon socket and SSH credentials
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${HOME}/.ssh:/home/hermeswebui/.ssh
+    group_add:
+      - "963"
     environment:
       # Set to your host user ID: run `id -u` and `id -g` to find them.
       # On macOS, UIDs start at 501 (not 1000), so set UID and GID in a .env file:
