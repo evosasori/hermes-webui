@@ -18856,6 +18856,7 @@ def handle_post(handler, parsed) -> bool:
             return bad(handler, "provider is required")
         from api.config import invalidate_provider_models_cache
         invalidate_provider_models_cache(provider_id)
+        _clear_live_models_cache()
         return j(handler, {"ok": True, "provider": provider_id})
 
     if parsed.path == "/api/reasoning":
@@ -18898,6 +18899,14 @@ def handle_post(handler, parsed) -> bool:
     if parsed.path == "/api/admin/reload":
         # Hot-reload api modules to pick up code changes without restart.
         import importlib, sys
+        import api.config as _config
+        importlib.reload(_config)
+        try:
+            _config._delete_models_cache_on_disk()
+            _config.invalidate_provider_models_cache("custom")
+        except Exception:
+            pass
+        _clear_live_models_cache()
         from api import updates as _updates
         importlib.reload(_updates)
         from api import agent_sessions as _agent_sessions
@@ -18908,6 +18917,9 @@ def handle_post(handler, parsed) -> bool:
         importlib.reload(_streaming)
         import api.routes as _routes
         importlib.reload(_routes)
+        _routes.get_available_models = _config.get_available_models
+        _routes.get_available_models_for_session_visit = _config.get_available_models_for_session_visit
+        _routes.invalidate_provider_models_cache = _config.invalidate_provider_models_cache
         for mod_name, mod in list(sys.modules.items()):
             if mod and hasattr(mod, 'handle_get'):
                 setattr(mod, 'handle_get', _routes.handle_get)
@@ -26032,7 +26044,10 @@ def _handle_live_models(handler, parsed):
                         
                         _req = urllib.request.Request(
                             _models_url,
-                            headers={"Authorization": f"Bearer {_api_key}"},
+                            headers={
+                                "Authorization": f"Bearer {_api_key}",
+                                "User-Agent": "OpenAI/Python 1.0",
+                            },
                         )
                         
                         with urllib.request.urlopen(_req, timeout=CUSTOM_MODELS_ENDPOINT_TIMEOUT_SECONDS) as _resp:
@@ -26122,7 +26137,10 @@ def _handle_live_models(handler, parsed):
                     if _key:
                         _req = urllib.request.Request(
                             f"{_ep}/models",
-                            headers={"Authorization": f"Bearer {_key}"},
+                            headers={
+                                "Authorization": f"Bearer {_key}",
+                                "User-Agent": "OpenAI/Python 1.0",
+                            },
                         )
                         with urllib.request.urlopen(_req, timeout=8) as _resp:
                             _body = json.loads(_resp.read())
@@ -26152,6 +26170,11 @@ def _handle_live_models(handler, parsed):
                 ids = _featured
             except Exception:
                 logger.debug("Failed to apply Nous featured-set cap for /api/models/live")
+        elif provider == "custom" or provider.startswith("custom:"):
+            # Custom/gateway endpoints (9router, Ollama, vLLM): do not truncate
+            # the live catalog — the user connects a custom provider specifically
+            # to access all of its served models.
+            pass
         else:
             from api.config import _MODEL_PICKER_OVERFLOW_THRESHOLD, _MODEL_PICKER_VISIBLE_TARGET
             if len(ids) > _MODEL_PICKER_OVERFLOW_THRESHOLD:

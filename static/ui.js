@@ -5764,7 +5764,11 @@ async function populateModelDropdown(opts={}){
       // #7528 owner option B: only custom/aggregator groups are re-sorted;
       // built-in groups keep the curated catalog order the API shipped.
       const _gPid=String(g.provider_id||'').trim().toLowerCase();
-      const _gModels=Array.isArray(g.models)?g.models:[];
+      const _gModelsRaw = Array.isArray(g.models) ? g.models : [];
+      const _gExtraRaw = Array.isArray(g.extra_models) ? g.extra_models : [];
+      const _gModels = (_gPid === 'custom' || _gPid.startsWith('custom:'))
+        ? [..._gModelsRaw, ..._gExtraRaw]
+        : _gModelsRaw;
       for(const m of ((_gPid==='custom'||_gPid.startsWith('custom:'))?_sortModelEntries(_gModels,g.provider_id):_gModels)){
         const opt=document.createElement('option');
         opt.value=m.id;
