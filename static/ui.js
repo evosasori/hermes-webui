@@ -6727,18 +6727,10 @@ function renderModelDropdown(){
   _scopeNote.textContent=opts.scopeNoteText||(t('model_scope_advisory')||'Applies to this conversation from your next message.');
   const _searchRow=document.createElement('div');
   _searchRow.className='model-search-row';
-  _searchRow.innerHTML=`<input class="model-search-input" type="text" placeholder="${esc(t('model_search_placeholder')||'Search models…')}" spellcheck="false" autocomplete="off"><button class="model-search-clear" title="Clear search">${li('x',10)}</button>`;
+  _searchRow.innerHTML=`<input class="model-search-input" type="text" placeholder="${esc(t('model_search_placeholder')||'Search models…')}" spellcheck="false" autocomplete="off"><button class="model-search-clear" type="button" title="Clear search" style="display:none">${li('x',10)}</button><button class="model-search-refresh" type="button" title="${esc(t('model_refresh_title')||'Refresh models')}">${li('refresh-cw',12)}</button>`;
   const _si=_searchRow.querySelector('.model-search-input');
   const _sc=_searchRow.querySelector('.model-search-clear');
-  // Create custom model section elements
-  const _custSep=document.createElement('div');
-  _custSep.className='model-group model-custom-sep';
-  _custSep.textContent=t('model_custom_label')||'Custom model ID';
-  const _custRow=document.createElement('div');
-  _custRow.className='model-custom-row';
-  _custRow.innerHTML=`<input class="model-custom-input" type="text" placeholder="${esc(t('model_custom_placeholder')||'e.g. openai/gpt-5.4')}" spellcheck="false" autocomplete="off"><button class="model-custom-btn" title="Use this model">${li('plus',12)}</button>`;
-  const _ci=_custRow.querySelector('.model-custom-input');
-  const _cb=_custRow.querySelector('.model-custom-btn');
+  const _sr=_searchRow.querySelector('.model-search-refresh');
   const _configuredRank=(badge)=>{
     if(!badge) return Number.POSITIVE_INFINITY;
     if(badge.role==='primary') return 0;
@@ -6973,6 +6965,7 @@ function renderModelDropdown(){
     // initial keyboard pop) doesn't lose focus mid-word on each keystroke re-render.
     const _hadFocus=(typeof document!=='undefined')&&document.activeElement===_si;
     term=term.trim().toLowerCase();
+    if(_sc) _sc.style.display = term ? '' : 'none';
     const hasSearch=!!term;
     // On a fresh search, expand all groups so every match is visible (#collapse).
     if(hasSearch) for(const k in _groupOpenState) _groupOpenState[k]=true;
@@ -7040,8 +7033,6 @@ function renderModelDropdown(){
     dd.innerHTML='';
     dd.appendChild(_scopeNote);
     dd.appendChild(_searchRow);
-    dd.appendChild(_custSep);
-    dd.appendChild(_custRow);
     if(configuredModels.length){
       const configuredHeading=document.createElement('div');
       configuredHeading.className='model-group';
@@ -7319,14 +7310,53 @@ function renderModelDropdown(){
   _si.addEventListener('click',e=>e.stopPropagation());
   _sc.onclick=()=>{ _si.value=''; _filterModels(''); _si.focus(); };
   _sc.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){ _si.value=''; _filterModels(''); _si.focus(); e.preventDefault(); }});
-  const _applyCustom=()=>{const v=_ci.value.trim();if(!v)return;selectFromDropdown(v,null);_ci.value='';};
-  _cb.onclick=_applyCustom;
-  _ci.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();_applyCustom();}if(e.key==='Escape'){e.preventDefault();e.stopPropagation();closeDropdown();}});
-  _ci.addEventListener('click',e=>e.stopPropagation());
+  if(_sr){
+    _sr.addEventListener('click', async (e)=>{
+      e.stopPropagation();
+      e.preventDefault();
+      if(_sr.classList.contains('spinning')) return;
+      _sr.classList.add('spinning');
+      _sr.disabled=true;
+      try{
+        const activeProv=window._activeProvider||'custom';
+        try{
+          if(typeof api==='function'){
+            await api('/api/models/refresh',{
+              method:'POST',
+              body:JSON.stringify({provider:activeProv})
+            });
+          }
+        }catch(_){}
+        if(typeof _liveModelCache==='object'&&_liveModelCache){
+          for(const k in _liveModelCache) delete _liveModelCache[k];
+        }
+        if(typeof window._invalidateSlashModelCache==='function'){
+          window._invalidateSlashModelCache();
+        }
+        window._modelDropdownReady=null;
+        if(typeof populateModelDropdown==='function'){
+          await populateModelDropdown({freshness:'session_visit'});
+        }
+        if(opts.dropdownId==='settingsModelDropdown'&&typeof _loadAuxiliaryModels==='function'){
+          _loadAuxiliaryModels();
+        }
+        renderModelDropdown(opts);
+        if(typeof showToast==='function'){
+          showToast(t('models_refreshed')||'Model list refreshed');
+        }
+      }catch(err){
+        console.error('[hermes] Failed to refresh models:', err);
+        if(typeof showToast==='function'){
+          showToast('Failed to refresh models: '+(err.message||err));
+        }
+      }finally{
+        _sr.classList.remove('spinning');
+        _sr.disabled=false;
+      }
+    });
+  }
   dd.appendChild(_scopeNote);
   dd.appendChild(_searchRow);
-  dd.appendChild(_custSep);
-  dd.appendChild(_custRow);
   _filterModels('');
 }
 

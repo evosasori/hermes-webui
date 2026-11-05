@@ -9676,6 +9676,26 @@ def _read_live_provider_model_ids(provider_id: str) -> list[str]:
                 result.append(mid_s)
         if result:
             return result
+
+    if not seen:
+        try:
+            from pathlib import Path
+            import json, os
+            cache_file = Path(os.getenv("HERMES_HOME", str(Path.home() / ".hermes"))).expanduser().resolve() / "provider_models_cache.json"
+            if cache_file.exists():
+                cache_data = json.loads(cache_file.read_text(encoding="utf-8"))
+                for k, v in cache_data.items():
+                    if isinstance(v, dict) and "models" in v:
+                        k_norm = k.split(":")[0].lower()
+                        if k_norm == pid.lower() or pid.lower() in k.lower() or (pid.lower() == "custom" and "custom" in k.lower()):
+                            for mid in v.get("models") or []:
+                                mid_s = str(mid or "").strip()
+                                if mid_s and mid_s not in seen:
+                                    seen.add(mid_s)
+        except Exception:
+            pass
+    if seen:
+        return list(seen)
     return []
 
 

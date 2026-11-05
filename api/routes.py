@@ -16935,6 +16935,13 @@ def handle_get(handler, parsed) -> bool:
                 result = get_available_models_for_session_visit()
                 diag.stage("response_serialize") if diag else None
                 return j(handler, result)
+            if freshness in ("force", "refresh"):
+                from api.config import invalidate_provider_models_cache
+                invalidate_provider_models_cache("custom")
+                _clear_live_models_cache()
+                result = get_available_models(force_refresh=True)
+                diag.stage("response_serialize") if diag else None
+                return j(handler, result)
             if freshness:
                 return bad(handler, f"unknown models freshness: {freshness}", status=400)
             return j(handler, get_available_models())
@@ -26102,6 +26109,20 @@ def _handle_live_models(handler, parsed):
                                 ids.append(_aid)
                 else:
                     ids = list(_allowlist_ids or _config_ids)
+                # Check provider_models_cache.json for live discovered models
+                try:
+                    from pathlib import Path
+                    _pmc = Path(os.getenv("HERMES_HOME", str(Path.home() / ".hermes"))).expanduser().resolve() / "provider_models_cache.json"
+                    if _pmc.exists():
+                        _cdata = json.loads(_pmc.read_text(encoding="utf-8"))
+                        for _k, _v in _cdata.items():
+                            if isinstance(_v, dict) and "models" in _v and ("custom" in _k.lower() or provider in _k.lower()):
+                                _cached_models = list(_v.get("models") or [])
+                                if len(_cached_models) > len(ids):
+                                    ids = _cached_models
+                                break
+                except Exception:
+                    pass
 
         # ── OpenAI-compat live fetch fallback ──────────────────────────────────
         # When provider_model_ids() is unavailable or returns [] for a provider
